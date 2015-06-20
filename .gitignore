@@ -1,0 +1,285 @@
+From ec4ffd5ac34ee166bce5fc3a2842681f9d04abee Mon Sep 17 00:00:00 2001
+From: Nileema Shingte <nileema.shingte@gmail.com>
+Date: Sat, 20 Jun 2015 09:18:27 -0700
+Subject: [PATCH 1/2] Remove unused field from InMemoryJoinHash
+
+---
+ .../main/java/com/facebook/presto/operator/InMemoryJoinHash.java   | 7 +------
+ .../src/main/java/com/facebook/presto/operator/PagesIndex.java     | 7 +------
+ .../src/main/java/com/facebook/presto/sql/gen/JoinCompiler.java    | 6 +++---
+ .../java/com/facebook/presto/sql/gen/TestJoinProbeCompiler.java    | 2 +-
+ 4 files changed, 6 insertions(+), 16 deletions(-)
+
+diff --git a/presto-main/src/main/java/com/facebook/presto/operator/InMemoryJoinHash.java b/presto-main/src/main/java/com/facebook/presto/operator/InMemoryJoinHash.java
+index b5e9536..ef5d75c 100644
+--- a/presto-main/src/main/java/com/facebook/presto/operator/InMemoryJoinHash.java
++++ b/presto-main/src/main/java/com/facebook/presto/operator/InMemoryJoinHash.java
+@@ -16,8 +16,6 @@
+ import com.facebook.presto.spi.Page;
+ import com.facebook.presto.spi.PageBuilder;
+ import com.facebook.presto.spi.block.Block;
+-import com.facebook.presto.spi.type.Type;
+-import com.google.common.collect.ImmutableList;
+ import com.google.common.primitives.Ints;
+ import io.airlift.slice.XxHash64;
+ import it.unimi.dsi.fastutil.HashCommon;
+@@ -26,7 +24,6 @@
+ import it.unimi.dsi.fastutil.longs.LongIterator;
+ 
+ import java.util.Arrays;
+-import java.util.List;
+ 
+ import static com.facebook.presto.operator.SyntheticAddress.decodePosition;
+ import static com.facebook.presto.operator.SyntheticAddress.decodeSliceIndex;
+@@ -47,12 +44,10 @@
+     private final boolean[] keyVisited;
+     private final int[] positionLinks;
+     private final long size;
+-    private final List<Type> hashTypes;
+ 
+-    public InMemoryJoinHash(LongArrayList addresses, List<Type> hashTypes, PagesHashStrategy pagesHashStrategy)
++    public InMemoryJoinHash(LongArrayList addresses, PagesHashStrategy pagesHashStrategy)
+     {
+         this.addresses = checkNotNull(addresses, "addresses is null");
+-        this.hashTypes = ImmutableList.copyOf(checkNotNull(hashTypes, "hashTypes is null"));
+         this.pagesHashStrategy = checkNotNull(pagesHashStrategy, "pagesHashStrategy is null");
+         this.channelCount = pagesHashStrategy.getChannelCount();
+ 
+diff --git a/presto-main/src/main/java/com/facebook/presto/operator/PagesIndex.java b/presto-main/src/main/java/com/facebook/presto/operator/PagesIndex.java
+index 921b3f5..b53161b 100644
+--- a/presto-main/src/main/java/com/facebook/presto/operator/PagesIndex.java
++++ b/presto-main/src/main/java/com/facebook/presto/operator/PagesIndex.java
+@@ -366,7 +366,6 @@ public LookupSource createLookupSource(List<Integer> joinChannels, Optional<Inte
+             }
+             LookupSource lookupSource = lookupSourceFactory.createLookupSource(
+                     valueAddresses,
+-                    joinChannelTypes.build(),
+                     ImmutableList.<List<Block>>copyOf(channels),
+                     hashChannel);
+ 
+@@ -383,11 +382,7 @@ public LookupSource createLookupSource(List<Integer> joinChannels, Optional<Inte
+                 joinChannels,
+                 hashChannel);
+ 
+-        ImmutableList.Builder<Type> hashTypes = ImmutableList.builder();
+-        for (Integer channel : joinChannels) {
+-            hashTypes.add(types.get(channel));
+-        }
+-        return new InMemoryJoinHash(valueAddresses, hashTypes.build(), hashStrategy);
++        return new InMemoryJoinHash(valueAddresses, hashStrategy);
+     }
+ 
+     @Override
+diff --git a/presto-main/src/main/java/com/facebook/presto/sql/gen/JoinCompiler.java b/presto-main/src/main/java/com/facebook/presto/sql/gen/JoinCompiler.java
+index 059ca14..c62f6ed 100644
+--- a/presto-main/src/main/java/com/facebook/presto/sql/gen/JoinCompiler.java
++++ b/presto-main/src/main/java/com/facebook/presto/sql/gen/JoinCompiler.java
+@@ -524,18 +524,18 @@ public LookupSourceFactory(Class<? extends LookupSource> lookupSourceClass, Page
+         {
+             this.pagesHashStrategyFactory = pagesHashStrategyFactory;
+             try {
+-                constructor = lookupSourceClass.getConstructor(LongArrayList.class, List.class, PagesHashStrategy.class);
++                constructor = lookupSourceClass.getConstructor(LongArrayList.class, PagesHashStrategy.class);
+             }
+             catch (NoSuchMethodException e) {
+                 throw Throwables.propagate(e);
+             }
+         }
+ 
+-        public LookupSource createLookupSource(LongArrayList addresses, List<Type> types, List<List<com.facebook.presto.spi.block.Block>> channels, Optional<Integer> hashChannel)
++        public LookupSource createLookupSource(LongArrayList addresses, List<List<com.facebook.presto.spi.block.Block>> channels, Optional<Integer> hashChannel)
+         {
+             PagesHashStrategy pagesHashStrategy = pagesHashStrategyFactory.createPagesHashStrategy(channels, hashChannel);
+             try {
+-                return constructor.newInstance(addresses, types, pagesHashStrategy);
++                return constructor.newInstance(addresses, pagesHashStrategy);
+             }
+             catch (Exception e) {
+                 throw Throwables.propagate(e);
+diff --git a/presto-main/src/test/java/com/facebook/presto/sql/gen/TestJoinProbeCompiler.java b/presto-main/src/test/java/com/facebook/presto/sql/gen/TestJoinProbeCompiler.java
+index 3e9fc77..e442516 100644
+--- a/presto-main/src/test/java/com/facebook/presto/sql/gen/TestJoinProbeCompiler.java
++++ b/presto-main/src/test/java/com/facebook/presto/sql/gen/TestJoinProbeCompiler.java
+@@ -109,7 +109,7 @@ public void testSingleChannel(boolean hashEnabled)
+             hashChannel = Optional.of(1);
+             channels = ImmutableList.of(channel, hashChannelBuilder.build());
+         }
+-        LookupSource lookupSource = lookupSourceFactoryFactory.createLookupSource(addresses, types, channels, hashChannel);
++        LookupSource lookupSource = lookupSourceFactoryFactory.createLookupSource(addresses, channels, hashChannel);
+ 
+         JoinProbeCompiler joinProbeCompiler = new JoinProbeCompiler();
+         JoinProbeFactory probeFactory = joinProbeCompiler.internalCompileJoinProbe(types, Ints.asList(0), hashChannel);
+
+From c6a07a79bf8647758971e3e175b9c1107daca649 Mon Sep 17 00:00:00 2001
+From: Nileema Shingte <nileema.shingte@gmail.com>
+Date: Fri, 19 Jun 2015 13:01:17 -0700
+Subject: [PATCH 2/2] Finish inner join if build is empty
+
+---
+ .../java/com/facebook/presto/operator/InMemoryJoinHash.java    |  8 ++++++++
+ .../java/com/facebook/presto/operator/LookupJoinOperator.java  |  8 ++++++++
+ .../main/java/com/facebook/presto/operator/LookupSource.java   |  2 ++
+ .../com/facebook/presto/operator/PartitionedLookupSource.java  | 10 ++++++++++
+ .../java/com/facebook/presto/operator/SharedLookupSource.java  |  6 ++++++
+ .../java/com/facebook/presto/operator/index/IndexLoader.java   |  6 ++++++
+ .../com/facebook/presto/operator/index/IndexLookupSource.java  |  6 ++++++
+ 7 files changed, 46 insertions(+)
+
+diff --git a/presto-main/src/main/java/com/facebook/presto/operator/InMemoryJoinHash.java b/presto-main/src/main/java/com/facebook/presto/operator/InMemoryJoinHash.java
+index ef5d75c..4c91797 100644
+--- a/presto-main/src/main/java/com/facebook/presto/operator/InMemoryJoinHash.java
++++ b/presto-main/src/main/java/com/facebook/presto/operator/InMemoryJoinHash.java
+@@ -39,6 +39,7 @@
+     private final PagesHashStrategy pagesHashStrategy;
+ 
+     private final int channelCount;
++    private final int positionCount;
+     private final int mask;
+     private final int[] key;
+     private final boolean[] keyVisited;
+@@ -50,6 +51,7 @@ public InMemoryJoinHash(LongArrayList addresses, PagesHashStrategy pagesHashStra
+         this.addresses = checkNotNull(addresses, "addresses is null");
+         this.pagesHashStrategy = checkNotNull(pagesHashStrategy, "pagesHashStrategy is null");
+         this.channelCount = pagesHashStrategy.getChannelCount();
++        this.positionCount = addresses.size();
+ 
+         // reserve memory for the arrays
+         int hashSize = HashCommon.arraySize(addresses.size(), 0.75f);
+@@ -93,6 +95,12 @@ public final int getChannelCount()
+     }
+ 
+     @Override
++    public boolean isEmpty()
++    {
++        return positionCount <= 0;
++    }
++
++    @Override
+     public long getInMemorySizeInBytes()
+     {
+         return size;
+diff --git a/presto-main/src/main/java/com/facebook/presto/operator/LookupJoinOperator.java b/presto-main/src/main/java/com/facebook/presto/operator/LookupJoinOperator.java
+index 123cf1d..57d8b77 100644
+--- a/presto-main/src/main/java/com/facebook/presto/operator/LookupJoinOperator.java
++++ b/presto-main/src/main/java/com/facebook/presto/operator/LookupJoinOperator.java
+@@ -25,6 +25,7 @@
+ import java.util.List;
+ 
+ import static com.facebook.presto.operator.LookupJoinOperators.JoinType.FULL_OUTER;
++import static com.facebook.presto.operator.LookupJoinOperators.JoinType.INNER;
+ import static com.facebook.presto.operator.LookupJoinOperators.JoinType.LOOKUP_OUTER;
+ import static com.facebook.presto.operator.LookupJoinOperators.JoinType.PROBE_OUTER;
+ import static com.facebook.presto.util.MoreFutures.tryGetUnchecked;
+@@ -45,6 +46,7 @@
+ 
+     private final boolean lookupOnOuterSide;
+     private final boolean probeOnOuterSide;
++    private final JoinType joinType;
+ 
+     private LookupSource lookupSource;
+     private JoinProbe probe;
+@@ -71,6 +73,7 @@ public LookupJoinOperator(
+ 
+         this.lookupSourceFuture = lookupSourceSupplier.getLookupSource(operatorContext);
+         this.joinProbeFactory = joinProbeFactory;
++        this.joinType = joinType;
+ 
+         // Cannot use switch case here, because javac will synthesize an inner class and cause IllegalAccessError
+         probeOnOuterSide = joinType == PROBE_OUTER || joinType == FULL_OUTER;
+@@ -139,6 +142,11 @@ public boolean needsInput()
+         if (lookupSource == null) {
+             lookupSource = tryGetUnchecked(lookupSourceFuture);
+         }
++        // for inner joins, if lookup source does not have any positions, we can finish
++        if (joinType == INNER && lookupSource != null && lookupSource.isEmpty()) {
++            finishing = true;
++            return false;
++        }
+         return lookupSource != null && probe == null;
+     }
+ 
+diff --git a/presto-main/src/main/java/com/facebook/presto/operator/LookupSource.java b/presto-main/src/main/java/com/facebook/presto/operator/LookupSource.java
+index 909e4aa..2795986 100644
+--- a/presto-main/src/main/java/com/facebook/presto/operator/LookupSource.java
++++ b/presto-main/src/main/java/com/facebook/presto/operator/LookupSource.java
+@@ -24,6 +24,8 @@
+ {
+     int getChannelCount();
+ 
++    boolean isEmpty();
++
+     long getInMemorySizeInBytes();
+ 
+     long getJoinPosition(int position, Page page, int rawHash);
+diff --git a/presto-main/src/main/java/com/facebook/presto/operator/PartitionedLookupSource.java b/presto-main/src/main/java/com/facebook/presto/operator/PartitionedLookupSource.java
+index 3ddc35a..e1774b5 100644
+--- a/presto-main/src/main/java/com/facebook/presto/operator/PartitionedLookupSource.java
++++ b/presto-main/src/main/java/com/facebook/presto/operator/PartitionedLookupSource.java
+@@ -52,6 +52,16 @@ public int getChannelCount()
+     }
+ 
+     @Override
++    public boolean isEmpty()
++    {
++        boolean empty = true;
++        for (LookupSource lookupSource : lookupSources) {
++            empty = empty && lookupSource.isEmpty();
++        }
++        return empty;
++    }
++
++    @Override
+     public long getInMemorySizeInBytes()
+     {
+         return Arrays.stream(lookupSources).mapToLong(LookupSource::getInMemorySizeInBytes).sum();
+diff --git a/presto-main/src/main/java/com/facebook/presto/operator/SharedLookupSource.java b/presto-main/src/main/java/com/facebook/presto/operator/SharedLookupSource.java
+index a446ff3..f4c07b1 100644
+--- a/presto-main/src/main/java/com/facebook/presto/operator/SharedLookupSource.java
++++ b/presto-main/src/main/java/com/facebook/presto/operator/SharedLookupSource.java
+@@ -44,6 +44,12 @@ public int getChannelCount()
+     }
+ 
+     @Override
++    public boolean isEmpty()
++    {
++        return lookupSource.isEmpty();
++    }
++
++    @Override
+     public long getInMemorySizeInBytes()
+     {
+         return lookupSource.getInMemorySizeInBytes();
+diff --git a/presto-main/src/main/java/com/facebook/presto/operator/index/IndexLoader.java b/presto-main/src/main/java/com/facebook/presto/operator/index/IndexLoader.java
+index 6bafe68..14b5a78 100644
+--- a/presto-main/src/main/java/com/facebook/presto/operator/index/IndexLoader.java
++++ b/presto-main/src/main/java/com/facebook/presto/operator/index/IndexLoader.java
+@@ -367,6 +367,12 @@ public int getChannelCount()
+         }
+ 
+         @Override
++        public boolean isEmpty()
++        {
++            return true;
++        }
++
++        @Override
+         public long getInMemorySizeInBytes()
+         {
+             return 0;
+diff --git a/presto-main/src/main/java/com/facebook/presto/operator/index/IndexLookupSource.java b/presto-main/src/main/java/com/facebook/presto/operator/index/IndexLookupSource.java
+index b8bc14f..a66789b 100644
+--- a/presto-main/src/main/java/com/facebook/presto/operator/index/IndexLookupSource.java
++++ b/presto-main/src/main/java/com/facebook/presto/operator/index/IndexLookupSource.java
+@@ -45,6 +45,12 @@ public int getChannelCount()
+     }
+ 
+     @Override
++    public boolean isEmpty()
++    {
++        return false;
++    }
++
++    @Override
+     public long getInMemorySizeInBytes()
+     {
+         return 0;
